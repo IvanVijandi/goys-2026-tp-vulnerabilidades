@@ -6,7 +6,7 @@
 | Integrante | Usuario de GitHub | Rol en el TP |
 |---|---|---|
 | VIJANDI IVAN | `IvanVijandi` | Inventario |
-| NICOLAS VALDES | _completar_ | Cambios/parche |
+| NICOLAS VALDES | `Nico-valdes` | Priorización de riesgo y comité de crisis |
 | FACUNDO OTERO | _completar_ | Detección |
 | FRANCO PIETRANTUONO | _completar_ | Contención/comunicación |
 
@@ -35,11 +35,21 @@
 
 | Activo | CVSS | Explotación real | Exposición | Criticidad | Decisión y plazo |
 |--------|:----:|:----------------:|:----------:|:----------:|------------------|
-| | | | | | |
-| | | | | | |
-| | | | | | |
+| **Portal PHP** (`web01`) | **4.0: 9.2** (Crítico) | **Sí (CISA KEV)**. Ataques activos masivos *in the wild* y PoCs públicos. | **Internet (Alta)**. Expuesto vía HTTPS en perímetro; Apache `mod_php` procesa `session.upload_progress` pre-auth. | **Crítica**. Portal web transaccional y facturación de clientes de TransacRed S.A. | **Mitigación inmediata (< 2 h)** vía `php.ini` (`session.upload_progress.enabled = 0`). **Parche definitivo (< 12 h)** a PHP 8.3.36. |
+| **API Node.js** (`api01`) | **4.0: 9.2** (Crítico) | **No en producción**. RCE demostrado solo en laboratorio (sin registro en KEV al 29/10). | **Internet (Media/Alta)**. Expuesta vía API Gateway; endpoint `/decode` procesa Brotli de clientes externos. | **Alta**. Servicio de procesamiento y compresión de payloads transaccionales. | **Mitigación perimetral (< 6 h)** (rechazo de `br` en Gateway). **Parche programado (12–24 h)** a Node.js 22.23.4. |
+| **Servicio Python** (`svc01`) | **4.0: 9.2** (Crítico) | **No**. Sin reportes de explotación dirigida ni presencia en KEV. | **Interna (Baja)**. Backend en `labnet`, sin puertos expuestos a Internet. Procesa datos prefiltrados. | **Media**. Servicio interno de cálculo y soporte asincrónico. | **Parche estándar (24–48 h)** en ventana regular de mantenimiento (actualizar a Brotli >= 1.0.10 / 1.2.1). Monitoreo pasivo. |
 
-**Justificación:** _¿por qué ese orden? ¿qué evidencia nueva cambiaría la decisión?_
+**Justificación:**
+1. **Riesgo real vs. severidad teórica (CVSS vs. KEV/Exposición):**
+   Aunque los tres activos comparten un puntaje base idéntico (**CVSS 4.0: 9.2**), el riesgo operativo no es uniforme. La priorización adopta el modelo RBVM (*Risk-Based Vulnerability Management*):
+   - **PHP va primero (< 2 h):** La presencia confirmada en **CISA KEV** con campañas automatizadas activas, sumada a la arquitectura Apache + `mod_php` (donde la vulnerabilidad se gatilla en memoria del worker *antes* de cualquier middleware o capa de aplicación), convierte al Portal PHP en un blanco de compromiso inminente. Además, la mitigación por configuración (`session.upload_progress.enabled = 0`) es no invasiva, instantánea y con riesgo cero de interrupción del negocio.
+   - **Node.js en segundo lugar (12–24 h):** El decodificador Brotli embebido en el runtime expone al endpoint público `/decode`, pero la ausencia de explotación masiva en el mundo real (sin KEV al 29/10) descarta una crisis descontrolada en curso. Se mitiga preventivamente a nivel perimetral y se planifica una ventana controlada de cambio con pruebas de regresión de APIs.
+   - **Python en tercer lugar (24–48 h):** Es un servicio estrictamente interno, no ruteable desde Internet y confinado en la red Docker (`labnet`). No procesa tráfico no confiable directo, reduciendo drásticamente la probabilidad de explotación.
+
+2. **¿Qué evidencia nueva cambiaría la decisión?**
+   - **Elevación de Node.js a < 2 h:** Si CISA añade CVE-2026-111497 al catálogo KEV, si se publica un exploit funcional confiable dirigido a APIs REST sobre Node 22, o si el SIEM detecta fallos de segmentación anómalos en el proceso `node`.
+   - **Elevación de Python a < 12 h:** Si una auditoría de arquitectura revela que el backend Python consume colas de mensajes o webhooks originados directamente por terceros sin sanitización en el Gateway.
+   - **Paso a protocolo de respuesta a incidentes (contención/apagado):** Si en la correlación de logs de auditoría se descubren llamadas no autorizadas a shells (`/bin/sh`, `curl`, `wget`) o conexiones salientes desde cualquiera de los tres servicios, se suspende el cronograma de parcheo y se procede a aislar el activo comprometido de la red inmediatamente.
 
 ---
 
@@ -101,7 +111,7 @@ _¿Qué harían distinto en las primeras 2 horas?_
 
 - [ ] El laboratorio arrancó y los 3 servicios quedaron `healthy`.
 - [x] Inventario con evidencia (versión, SAPI, configuración).
-- [ ] Matriz con decisión y plazo.
+- [x] Matriz con decisión y plazo.
 - [ ] Parche aplicado y verificado; reversión documentada.
 - [ ] Al menos 3 controles de contención probados.
 - [ ] `deteccion.md` completo.
