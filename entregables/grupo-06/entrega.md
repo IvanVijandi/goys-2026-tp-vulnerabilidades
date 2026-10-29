@@ -7,7 +7,7 @@
 |---|---|---|
 | VIJANDI IVAN | `IvanVijandi` | Inventario |
 | NICOLAS VALDES | `Nico-valdes` | Priorización de riesgo y comité de crisis |
-| FACUNDO OTERO | _completar_ | Detección |
+| FACUNDO OTERO | `facuotero11` | Mitigación, parche y reversión |
 | FRANCO PIETRANTUONO | _completar_ | Contención/comunicación |
 
 > Roles sugeridos: inventario, cambios/parche, detección, contención/comunicación.
@@ -57,12 +57,47 @@
 
 | Fecha/hora | Activo | Cambio | Antes | Después | Reversión |
 |------------|--------|--------|-------|---------|-----------|
-| | | | | | |
-| | | | | | |
+| 29/10 19:11 | Portal PHP | Mitigación: `session.upload_progress.enabled = 0` en `laboratorio/php/php.ini` + `docker compose restart php-lab` | `ini_get('session.upload_progress.enabled')` → `1` a las 19:09 ([captura](capturas/03-php-antes.png)) | `ini_get(...)` → `0` ([captura](capturas/03-php-despues.png)) | Volver la directiva a `1` (o `git revert` del commit `fix(php)`) y `docker compose restart php-lab`. **No se recomienda revertirla** aunque ya esté el parche: también mitiga CVE-2026-115560, que no tiene parche |
+| 29/10 19:20 | Portal PHP | Parche: `PHP_TAG=8.3.36-apache` + `docker compose --env-file laboratorio/versions.env up -d --build` | PHP 8.3.35 (Sección 1) | `php -v` → `PHP 8.3.36`; contenedor `healthy` ([captura](capturas/03-parche-versiones.png)) | Borrar la variable (`Remove-Item Env:PHP_TAG`) y repetir `up -d --build` con `versions.env` original |
+| 29/10 19:20 | API Node.js | Parche: `NODE_TAG=22.23.4-bookworm-slim` | Node.js v22.23.3 con Brotli 1.1.0 nativo (Sección 1) | Imagen `goys-vuln-lab-node:22.23.4-bookworm-slim`, contenedor `healthy` ([captura](capturas/03-parche-versiones.png)) | Borrar `NODE_TAG` y repetir `up -d --build` |
+| 29/10 19:20 | Servicio Python | Parche: `BROTLI_VERSION=1.2.1` | Brotli 1.0.9 (PyPI) (Sección 1) | Build ejecutó `pip install "brotli==1.2.1"`; imagen `goys-vuln-lab-py:1.2.1`, contenedor `healthy` ([captura](capturas/03-parche-versiones.png)) | Borrar `BROTLI_VERSION` y repetir `up -d --build` |
 
-**Prueba funcional mínima:** _¿qué verificaron para saber que la app sigue viva?_
+**Orden y criterio:** se siguió el orden de la Sección 2. Primero, la mitigación de PHP,
+aplicada dentro del plazo de < 2 h, porque compra tiempo sin reconstruir imágenes. La
+mitigación es parcial: corta el camino confirmado de CVE-2026-109619 (upload progress),
+pero no CVE-2026-109618, que se dispara por agotamiento de memoria al procesar uploads
+multipart. Por eso el parche a 8.3.36 es la corrección real. Costo de la mitigación: se
+pierden las barras de progreso de subida. En el laboratorio, los tres parches se
+aplicaron juntos porque el comando reconstruye todo el stack de una vez; en producción
+se escalonarían según los plazos de la Sección 2. Después del parche se volvió a
+verificar la mitigación (`ini_get` → `0`): sigue activa con la imagen nueva.
 
-**Qué no se pudo probar:** _declararlo explícitamente._
+**Incidente durante el parche:** el primer intento (19:14) falló al construir `node-lab`
+en `RUN npm install --omit=dev`, con `UNABLE_TO_VERIFY_LEAF_SIGNATURE` ("unable to verify
+the first certificate") contra `registry.npmjs.org`. PHP y Python sí habían descargado sus
+versiones nuevas, pero al fallar el build Docker no recreó ningún contenedor: los tres
+siguieron con la versión vulnerable. Se descartó desactivar la verificación de
+certificados, porque abre un riesgo de seguridad y obliga a modificar el Dockerfile. Se
+cambió de red y se repitió el mismo comando, que completó sin errores. Lección operativa:
+el parcheo depende de que haya acceso confiable al registro de paquetes, y un fallo
+parcial deja todo sin parchear.
+
+**Prueba funcional mínima:** después del parche, `docker compose ps` muestra los tres
+servicios (`php-lab`, `node-lab`, `py-lab`) en estado `Up (healthy)`
+([captura](capturas/03-parche-versiones.png)).
+
+**Qué no se pudo probar:**
+- No se ejecutaron exploits ni PoCs (regla de la cátedra). Se verificó la configuración
+  y la versión, no que el ataque quede bloqueado.
+- La verificación de la mitigación se hizo con `php -r` (la consola de PHP, no el
+  servidor web). Se asume que Apache usa el mismo `php.ini`; no se confirmó con un
+  `phpinfo()` servido por web.
+- La prueba funcional se basa en el healthcheck de Docker. No se hizo una petición HTTP
+  manual a cada servicio, ni se revisó qué endpoint consulta ese healthcheck.
+- Las versiones de Node 22.23.4 y Brotli 1.2.1 se evidencian por las imágenes y el log
+  del build, no consultándolas desde adentro del contenedor en ejecución. En particular,
+  no se verificó qué versión de Brotli nativo trae Node 22.23.4.
+- La reversión del parche está documentada pero no se ejecutó.
 
 ---
 
